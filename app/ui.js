@@ -237,9 +237,10 @@ export function Select({ value, options, onChange, size = "", className = "", di
 }
 
 export function Footer({ className = "" }) {
+  const year = new Date().getFullYear();
   return (
     <footer className={`app-footer ${className}`}>
-      <a href="https://nezden.com" target="_blank" rel="noopener noreferrer">© Nezden 2026</a>
+      <a href="https://nezden.com" target="_blank" rel="noopener noreferrer">© Nezden {year}</a>
       <span className="dot">·</span>
       <span>
         Built by{" "}
