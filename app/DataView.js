@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CellValue } from "./Cell";
+import { Modal, Progress, Select, Skeleton, Spinner, useConfirm } from "./ui";
 
 const PAGE_SIZES = [50, 100, 250, 500];
 
@@ -18,6 +19,7 @@ export default function DataView({ db, table }) {
   const [editing, setEditing] = useState(null); // { r, c, value }
   const [selected, setSelected] = useState(new Set());
   const [inserting, setInserting] = useState(false);
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,7 +83,13 @@ export default function DataView({ db, table }) {
 
   async function deleteSelected() {
     if (!selected.size) return;
-    if (!confirm(`Delete ${selected.size} row(s) from ${table.schema}.${table.name}?`)) return;
+    const ok = await confirm({
+      title: `Delete ${selected.size} row${selected.size > 1 ? "s" : ""}?`,
+      body: `This permanently removes them from ${table.schema}.${table.name}.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const d = await mutate({ action: "delete", keys: [...selected].map((i) => rowKey(data.rows[i])) });
       flash(`Deleted ${d.rowCount} row(s)`);
@@ -99,7 +107,8 @@ export default function DataView({ db, table }) {
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return (
-    <div className="dataview">
+    <div className="dataview view">
+      {loading && data && <Progress />}
       <div className="toolbar">
         <form
           className="where"
@@ -119,7 +128,7 @@ export default function DataView({ db, table }) {
         {canEdit && selected.size > 0 && (
           <button className="btn danger" onClick={deleteSelected}>Delete {selected.size}</button>
         )}
-        <button className="btn icon" title="Reload" onClick={load}>↻</button>
+        <button className="btn icon" title="Reload" onClick={load}>{loading ? <Spinner /> : "↻"}</button>
       </div>
 
       {data && !data.editable && <div className="muted small notice">Read-only: {table.kind}</div>}
@@ -130,6 +139,7 @@ export default function DataView({ db, table }) {
         </div>
       )}
       {notice && <div className="toast">{notice}</div>}
+      {!data && loading && <div className="pad"><Skeleton rows={12} widths={[96, 92, 95, 90, 94, 91]} /></div>}
 
       {data && (
         <div className={`grid-wrap ${loading ? "loading" : ""}`}>
@@ -196,9 +206,12 @@ export default function DataView({ db, table }) {
             {canEdit && " · double-click a cell to edit"}
           </span>
           <div className="spacer" />
-          <select className="select sm" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
-            {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} / page</option>)}
-          </select>
+          <Select
+            size="sm"
+            value={pageSize}
+            options={PAGE_SIZES.map((n) => ({ value: n, label: `${n} / page` }))}
+            onChange={(n) => { setPageSize(n); setPage(1); }}
+          />
           <button className="btn" disabled={page <= 1} onClick={() => setPage(1)}>«</button>
           <button className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹</button>
           <span className="small">Page {page} of {pages.toLocaleString()}</span>
@@ -265,8 +278,8 @@ function InsertDialog({ columns, onClose, onSubmit }) {
   }
 
   return (
-    <div className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="modal" onSubmit={submit}>
+    <Modal as="form" onClose={onClose} onSubmit={submit}>
+      {(close) => (<>
         <h3>Insert row</h3>
         <div className="fields">
           {columns.map((c) => {
@@ -282,11 +295,17 @@ function InsertDialog({ columns, onClose, onSubmit }) {
                     value={s.mode === "value" ? s.v : ""}
                     onChange={(e) => set(c.name, { v: e.target.value })}
                   />
-                  <select className="select sm" value={s.mode} onChange={(e) => set(c.name, { mode: e.target.value })}>
-                    <option value="value">value</option>
-                    {c.default && <option value="default">default</option>}
-                    {c.nullable && <option value="null">null</option>}
-                  </select>
+                  <Select
+                    size="sm"
+                    className="mode-select"
+                    value={s.mode}
+                    options={[
+                      { value: "value", label: "value" },
+                      ...(c.default ? [{ value: "default", label: "default" }] : []),
+                      ...(c.nullable ? [{ value: "null", label: "null" }] : []),
+                    ]}
+                    onChange={(mode) => set(c.name, { mode })}
+                  />
                 </div>
               </label>
             );
@@ -294,10 +313,10 @@ function InsertDialog({ columns, onClose, onSubmit }) {
         </div>
         {err && <div className="err banner">{err}</div>}
         <div className="row gap end">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy}>{busy ? "Inserting…" : "Insert"}</button>
+          <button type="button" className="btn" onClick={close}>Cancel</button>
+          <button className="btn primary" disabled={busy}>{busy ? <><Spinner size={12} /> Inserting…</> : "Insert"}</button>
         </div>
-      </form>
-    </div>
+      </>)}
+    </Modal>
   );
 }

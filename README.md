@@ -4,7 +4,12 @@ A private, full read/write Postgres client for a home server. Next.js 16 (App Ro
 
 ## What the prototype does
 
-- **Database dropdown.** It lists every database on each configured server.
+- **Connections.** Add, edit and delete Postgres connections from the sidebar (**+ Add**).
+  - Give each one a name, then fill in host, port, database, user, password and SSL, or paste a `postgres://` connection string to fill them.
+  - **Test** checks the connection before you save it.
+  - A connection shows just its own database, or every database on the server if you tick that box.
+  - They're stored in `$DATA_DIR/connections.json` (default `./data`). Passwords are encrypted with AES-256-GCM using a key derived from `SESSION_SECRET`. If you change the secret, re-enter saved passwords.
+  - Connections from `DATABASE_URL` / `DATABASE_SERVERS` still work and appear read-only.
 - **Table browser.** Tables, views and materialized views are grouped by schema, with a filter and row estimates.
 - **Data tab.**
   - Pagination (50–500 rows per page), with sorting when you click a column header.
@@ -13,6 +18,7 @@ A private, full read/write Postgres client for a home server. Next.js 16 (App Ro
   - Select rows to delete them, or use **+ Row** to insert with a value, default or null per column.
   - Every write runs in a transaction and rolls back if it doesn't hit exactly the expected number of rows.
   - Tables without a primary key fall back to `ctid`. Views are read-only.
+- **Structure tab.** With no table selected it shows a schema overview: every table as a card with columns, keys and foreign-key links. Hover a card to highlight its related tables. With a table selected it shows columns, indexes, constraints, the tables that reference it, and generated DDL you can copy.
 - **SQL tab.** Runs any SQL, including several statements at once, with one result tab per statement.
   - Ctrl/⌘+Enter runs the query, or just the selection if there is one.
   - Errors show the Postgres code, detail and hint.
@@ -37,8 +43,8 @@ There is one admin password and no signup or users table. dbdesk doesn't need a 
 ```bash
 cp .env.example .env.local
 npm install
-npm run hash-password        # paste both lines into .env.local, then set DATABASE_URL
-npm run dev                  # http://localhost:3000
+npm run hash-password        # paste both lines into .env.local
+npm run dev                  # http://localhost:3000, then "+ Add" a connection
 ```
 
 ## Deploy on Coolify (Tailscale-only)
@@ -47,9 +53,10 @@ npm run dev                  # http://localhost:3000
 2. **Leave the Domains field empty.** That keeps Traefik from routing to the app, so nothing appears on Cloudflare or the public internet.
 3. **Environment variables:**
    - Paste `ADMIN_PASSWORD_HASH` and `SESSION_SECRET` from `npm run hash-password`. Run it on your PC, or in the app's Coolify terminal with `node scripts/hash-password.mjs`, then redeploy.
-   - Set `DATABASE_URL` to your Postgres resource's **internal** URL. In Coolify, open the Postgres resource and copy *Postgres URL (internal)*. Change the database at the end to `postgres` and use the `postgres` superuser so every DB is listed.
+4. **Persistent storage:** add a volume mounted at `/app/data` so saved connections survive redeploys.
+   - Then add connections in the app. For a Coolify Postgres resource, paste its *Postgres URL (internal)*.
    - If the app can't resolve that hostname, turn on **Connect To Predefined Network** in the app's Advanced settings.
-4. **Expose it on the tailnet only.** Pick one option:
+5. **Expose it on the tailnet only.** Pick one option:
    - **A. Tailscale Serve (recommended).** This gives you HTTPS and a MagicDNS name.
      - Set *Ports Mappings* to `127.0.0.1:3000:3000`.
      - On the host, run `sudo tailscale serve --bg --https=8443 http://127.0.0.1:3000`.
@@ -58,23 +65,29 @@ npm run dev                  # http://localhost:3000
      - Set *Ports Mappings* to `100.x.y.z:3000:3000`, using your host's `tailscale ip -4`.
      - Open `http://100.x.y.z:3000`.
      - If the container fails to start after a reboot because Docker came up before Tailscale, add `After=tailscaled.service` to Docker's systemd unit, or use option A.
-5. Never map a plain `3000:3000`. That binds to `0.0.0.0`, so a forwarded router port or open firewall would put your DB client, guarded only by the password, on the internet.
+6. Never map a plain `3000:3000`. That binds to `0.0.0.0`, so a forwarded router port or open firewall would put your DB client, guarded only by the password, on the internet.
 
 ## Layout
 
 ```
 proxy.js                  redirects to /login without a valid session
 lib/auth.js               scrypt verify, signed session cookie, login rate limit
-lib/db.js                 pool per server/database, identifier quoting, column metadata
+lib/connections.js        saved connections (JSON file, encrypted passwords) + env connections
+lib/db.js                 pool per connection/database, identifier quoting, column metadata
 app/login                 login page
 app/api/auth/login|logout POST sign in / sign out
-app/api/databases         GET  list databases on every server
+app/api/connections       GET/POST/PUT/DELETE saved connections; /test tries one
+app/api/databases         GET  list databases for every connection
 app/api/tables            GET  tables/views in a database
 app/api/table             GET  page of rows + columns + pk + count
 app/api/rows              POST insert / update / delete (parameterized)
 app/api/query             POST run arbitrary SQL
+app/api/schema            GET  schema overview, or one table's structure + DDL
 app/page.js               shell: db dropdown, table list, tabs
+app/ConnectionDialog.js   add / edit / test / delete a connection
 app/DataView.js           grid, edit, insert, delete, paging
 app/SqlView.js            SQL editor + results
+app/SchemaView.js         schema overview cards + table structure
+app/ui.js                 Modal, confirm dialog, spinner, skeleton, progress bar
 scripts/hash-password.mjs prints ADMIN_PASSWORD_HASH + SESSION_SECRET
 ```

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Footer, Spinner } from "../ui";
 
 export default function Login() {
   const [password, setPassword] = useState("");
@@ -44,9 +45,10 @@ export default function Login() {
         />
         {error && <div className="err small">{error}</div>}
         <button className="btn primary" disabled={busy || !password}>
-          {busy ? "Signing in…" : "Sign in"}
+          {busy ? <><Spinner size={12} /> Signing in…</> : "Sign in"}
         </button>
       </form>
+      <Footer className="login-footer" />
     </div>
   );
 }

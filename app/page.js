@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DataView from "./DataView";
 import SqlView from "./SqlView";
+import ConnectionDialog from "./ConnectionDialog";
+import SchemaView from "./SchemaView";
+import { Footer, Select, Skeleton, Spinner } from "./ui";
 
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
@@ -18,6 +21,10 @@ export default function Home() {
   const [table, setTable] = useState(null); // { schema, name, kind }
   const [tab, setTab] = useState("data");
   const [error, setError] = useState(null);
+  const [connections, setConnections] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [dialog, setDialog] = useState(null); // null | {} (new) | connection (edit)
+  const [tablesLoading, setTablesLoading] = useState(false);
 
   // Session expired mid-use -> back to the login page.
   useEffect(() => {
@@ -38,34 +45,63 @@ export default function Home() {
     window.location.replace("/login");
   }
 
-  useEffect(() => {
-    fetch("/api/databases").then((r) => r.json()).then((d) => {
-      if (d.error) return setError(d.error);
+  // prefer: connection id to select afterwards (after adding/editing one)
+  const loadDbs = useCallback(async (prefer) => {
+    try {
+      const [d, c] = await Promise.all([
+        fetch("/api/databases").then((r) => r.json()),
+        fetch("/api/connections").then((r) => r.json()),
+      ]);
+      if (d.error || c.error) return setError(d.error || c.error);
+      setConnections(c.connections);
       setDbs(d.databases);
       setDbErrors(d.errors || []);
       const last = store.get("dbdesk.db");
-      const found = last && d.databases.find((x) => x.server === last.server && x.database === last.database);
-      setDb(found || d.databases[0] || null);
-    }).catch((e) => setError(e.message));
+      const same = (x, y) => x && y && x.server === y.server && x.database === y.database;
+      setDb((cur) =>
+        (prefer && d.databases.find((x) => x.server === prefer)) ||
+        d.databases.find((x) => same(x, cur)) ||
+        d.databases.find((x) => same(x, last)) ||
+        d.databases[0] ||
+        null
+      );
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoaded(true);
+    }
   }, []);
+
+  useEffect(() => { loadDbs(); }, [loadDbs]);
+
+  // Ignore table lists that arrive after the selected db changed (or was removed).
+  const dbRef = useRef(db);
+  dbRef.current = db;
 
   const loadTables = useCallback(() => {
     if (!db) return;
-    setTables([]);
+    setTablesLoading(true);
+    const stale = () => dbRef.current !== db;
     fetch(`/api/tables?server=${encodeURIComponent(db.server)}&db=${encodeURIComponent(db.database)}`)
       .then((r) => r.json())
-      .then((d) => (d.error ? setError(d.error) : setTables(d.tables)));
+      .then((d) => !stale() && (d.error ? setError(d.error) : setTables(d.tables)))
+      .catch((e) => !stale() && setError(e.message))
+      .finally(() => !stale() && setTablesLoading(false));
   }, [db]);
 
   useEffect(() => {
-    if (!db) return;
-    store.set("dbdesk.db", db);
+    setTables([]);
     setTable(null);
     setError(null);
+    setTablesLoading(false);
+    if (!db) return;
+    store.set("dbdesk.db", db);
     loadTables();
   }, [db, loadTables]);
 
-  const multiServer = new Set(dbs.map((d) => d.server)).size > 1;
+  const openTable = (t, nextTab) => { setTable(t); setTab(nextTab); };
+  const dbLabel = (d) => (d.all ? `${d.name} / ${d.database}` : d.name);
+  const currentConn = db && connections.find((c) => c.id === db.server);
   const dbKey = (d) => `${d.server}\u0000${d.database}`;
 
   const grouped = useMemo(() => {
@@ -85,30 +121,41 @@ export default function Home() {
           <div className="brand">db<span>desk</span></div>
           <button className="btn sm" onClick={logout} title="Sign out">Sign out</button>
         </div>
-        <label className="label">Database</label>
-        <select
-          className="select"
-          value={db ? dbKey(db) : ""}
-          onChange={(e) => setDb(dbs.find((d) => dbKey(d) === e.target.value))}
-        >
-          {dbs.map((d) => (
-            <option key={dbKey(d)} value={dbKey(d)}>
-              {multiServer ? `${d.server} / ` : ""}{d.database} ({d.size})
-            </option>
-          ))}
-        </select>
-        {dbErrors.map((e) => (
-          <div key={e.server} className="err small">{e.server}: {e.error}</div>
-        ))}
+        <div className="row gap">
+          <label className="label">Database</label>
+          <div className="spacer" />
+          {currentConn && !currentConn.readOnly && (
+            <button className="btn sm" onClick={() => setDialog(currentConn)} title="Edit this connection">Edit</button>
+          )}
+          <button className="btn sm" onClick={() => setDialog({})} title="Add a connection">+ Add</button>
+        </div>
+        {!loaded && <div className="sk-line tall" />}
+        {loaded && dbs.length > 0 && (
+          <Select
+            value={db ? dbKey(db) : ""}
+            options={dbs.map((d) => ({ value: dbKey(d), label: dbLabel(d), hint: d.size }))}
+            onChange={(v) => setDb(dbs.find((d) => dbKey(d) === v))}
+          />
+        )}
+        {dbErrors.map((e) => {
+          const conn = connections.find((c) => c.id === e.server);
+          return (
+            <div key={e.server} className="err small conn-err">
+              <span>{e.name}: {e.error}</span>
+              {conn && !conn.readOnly && <button className="btn sm" onClick={() => setDialog(conn)}>Edit</button>}
+            </div>
+          );
+        })}
 
         <div className="row gap">
           <input className="input" placeholder="Filter tables…" value={tableFilter} onChange={(e) => setTableFilter(e.target.value)} />
-          <button className="btn icon" title="Refresh" onClick={loadTables}>↻</button>
+          <button className="btn icon" title="Refresh" onClick={loadTables} disabled={!db}>{tablesLoading ? <Spinner /> : "↻"}</button>
         </div>
 
         <nav className="tables">
+          {(!loaded || (tablesLoading && !tables.length)) && <div className="pad"><Skeleton rows={9} /></div>}
           {Object.entries(grouped).map(([schema, list]) => (
-            <div key={schema}>
+            <div key={schema} className="schema-group">
               <div className="schema">{schema}</div>
               {list.map((t) => {
                 const active = table?.schema === t.schema && table?.name === t.name;
@@ -116,7 +163,7 @@ export default function Home() {
                   <button
                     key={t.name}
                     className={`table-item ${active ? "active" : ""}`}
-                    onClick={() => { setTable(t); setTab("data"); }}
+                    onClick={() => openTable(t, tab === "structure" ? "structure" : "data")}
                   >
                     <span className={`kind kind-${t.kind}`}>{t.kind[0]}</span>
                     <span className="tname">{t.name}</span>
@@ -126,36 +173,61 @@ export default function Home() {
               })}
             </div>
           ))}
-          {db && !tables.length && <div className="muted small pad">No tables</div>}
+          {db && !tablesLoading && !tables.length && <div className="muted small pad">No tables</div>}
         </nav>
+        <Footer />
       </aside>
 
       <main className="main">
         <header className="topbar">
           <div className="tabs">
             <button className={`tab ${tab === "data" ? "on" : ""}`} onClick={() => setTab("data")}>Data</button>
+            <button className={`tab ${tab === "structure" ? "on" : ""}`} onClick={() => setTab("structure")}>Structure</button>
             <button className={`tab ${tab === "sql" ? "on" : ""}`} onClick={() => setTab("sql")}>SQL</button>
           </div>
           <div className="crumb">
-            {db && <>{multiServer && `${db.server} / `}<b>{db.database}</b></>}
-            {table && tab === "data" && <> / {table.schema}.<b>{table.name}</b></>}
+            {db && <>{db.all && `${db.name} / `}<b>{db.all ? db.database : db.name}</b></>}
+            {table && tab !== "sql" && <> / {table.schema}.<b>{table.name}</b></>}
           </div>
         </header>
         {error && <div className="err banner">{error}</div>}
-        {!dbs.length && !error && (
-          <div className="empty">No databases. Set <code>DATABASE_URL</code> or <code>DATABASE_SERVERS</code>.</div>
+        {!loaded && <div className="empty"><Spinner size={22} /></div>}
+        {loaded && !dbs.length && !error && (
+          <div className="empty">
+            {connections.length ? "None of your connections could be reached." : "No connections yet."}
+            <div><button className="btn primary" style={{ marginTop: 12 }} onClick={() => setDialog({})}>+ Add connection</button></div>
+          </div>
         )}
         {db && tab === "data" && (table ? (
           <DataView key={`${dbKey(db)}/${table.schema}.${table.name}`} db={db} table={table} />
         ) : (
-          <div className="empty">Pick a table on the left, or open the SQL tab.</div>
+          <div className="empty view">
+            Pick a table on the left, or
+            <div className="row gap" style={{ justifyContent: "center", marginTop: 12 }}>
+              <button className="btn" onClick={() => setTab("structure")}>Browse schema</button>
+              <button className="btn" onClick={() => setTab("sql")}>Open SQL</button>
+            </div>
+          </div>
         ))}
+        {db && tab === "structure" && (
+          <SchemaView key={`${dbKey(db)}/${table ? `${table.schema}.${table.name}` : ""}`} db={db} table={table} onOpen={openTable} />
+        )}
         {db && (
           <div style={{ display: tab === "sql" ? "contents" : "none" }}>
             <SqlView key={dbKey(db)} db={db} onSchemaChange={loadTables} />
           </div>
         )}
       </main>
+
+      {dialog && (
+        <ConnectionDialog
+          key={dialog.id ?? "new"}
+          initial={dialog}
+          onClose={() => setDialog(null)}
+          onSaved={(c) => { setDialog(null); loadDbs(c.id); }}
+          onDeleted={() => { setDialog(null); setDb(null); loadDbs(); }}
+        />
+      )}
     </div>
   );
 }

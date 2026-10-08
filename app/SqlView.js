@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ResultGrid } from "./Cell";
+import { Progress, Spinner } from "./ui";
 
 const DDL = /^\s*(create|alter|drop|truncate|comment)\b/im;
 
@@ -51,7 +52,8 @@ export default function SqlView({ db, onSchemaChange }) {
   const res = out?.results?.[active];
 
   return (
-    <div className="sql">
+    <div className="sql view">
+      {busy && <Progress />}
       <div className="editor-wrap">
         <textarea
           className="editor"
@@ -63,7 +65,7 @@ export default function SqlView({ db, onSchemaChange }) {
         />
         <div className="toolbar">
           <button className="btn primary" disabled={busy} onClick={() => run()}>
-            {busy ? "Running…" : "Run ▸"}
+            {busy ? <><Spinner size={12} /> Running…</> : "Run ▸"}
           </button>
           <span className="muted small">Ctrl/⌘+Enter · runs selection if any · writes are committed immediately</span>
         </div>
@@ -89,7 +91,7 @@ export default function SqlView({ db, onSchemaChange }) {
               {res.command} · {res.columns.length ? `${res.rows.length} rows` : `${res.rowCount ?? 0} affected`} · {out.ms} ms
             </span>
           </div>
-          {res.columns.length > 0 && <ResultGrid columns={res.columns} rows={res.rows} />}
+          {res.columns.length > 0 && <ResultGrid key={`${out.ms}-${active}`} columns={res.columns} rows={res.rows} />}
         </>
       )}
     </div>
