@@ -18,7 +18,7 @@ export async function GET(req) {
   const pageSize = Math.min(1000, Math.max(1, Number(p.get("pageSize")) || 100));
   const where = (p.get("where") || "").trim();
 
-  const client = await getPool(p.get("server"), p.get("db")).connect();
+  const client = await (await getPool(p.get("server"), p.get("db"))).connect();
   try {
     const columns = await getColumns(client, schema, table);
     const relkind = columns[0].relkind;

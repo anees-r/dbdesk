@@ -14,7 +14,7 @@ export async function POST(req) {
   const { server, db, sql } = await req.json();
   if (!sql?.trim()) return errorResponse(new Error("Empty query"));
 
-  const client = await getPool(server, db).connect();
+  const client = await (await getPool(server, db)).connect();
   const started = performance.now();
   try {
     const timeout = Number(process.env.STATEMENT_TIMEOUT_MS) || 60_000;

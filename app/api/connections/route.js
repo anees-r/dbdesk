@@ -14,7 +14,7 @@ export async function GET(req) {
   const denied = requireAuth(req);
   if (denied) return denied;
   try {
-    return Response.json({ connections: listConnections() });
+    return Response.json({ connections: await listConnections() });
   } catch (e) {
     return errorResponse(e, 500);
   }
@@ -24,7 +24,7 @@ export async function POST(req) {
   const denied = requireAuth(req);
   if (denied) return denied;
   try {
-    return Response.json({ connection: createConnection(await req.json()) });
+    return Response.json({ connection: await createConnection(await req.json()) });
   } catch (e) {
     return errorResponse(e);
   }
@@ -35,7 +35,7 @@ export async function PUT(req) {
   if (denied) return denied;
   try {
     const { id, ...input } = await req.json();
-    const connection = updateConnection(id, input);
+    const connection = await updateConnection(id, input);
     closePools(id);
     return Response.json({ connection });
   } catch (e) {
@@ -48,7 +48,7 @@ export async function DELETE(req) {
   if (denied) return denied;
   try {
     const id = new URL(req.url).searchParams.get("id");
-    deleteConnection(id);
+    await deleteConnection(id);
     closePools(id);
     return Response.json({ ok: true });
   } catch (e) {

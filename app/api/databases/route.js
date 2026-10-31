@@ -11,11 +11,11 @@ export async function GET(req) {
   const denied = requireAuth(req);
   if (denied) return denied;
   try {
-    const conns = listConnections();
+    const conns = await listConnections();
     const results = await Promise.all(
       conns.map(async (c) => {
         try {
-          const { rows } = await getPool(c.id).query(
+          const { rows } = await (await getPool(c.id)).query(
             c.allDatabases
               ? `select datname as database, pg_size_pretty(pg_database_size(datname)) as size
                    from pg_database

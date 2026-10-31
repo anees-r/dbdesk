@@ -27,7 +27,7 @@ export async function GET(req) {
   const denied = requireAuth(req);
   if (denied) return denied;
   const p = new URL(req.url).searchParams;
-  const client = await getPool(p.get("server"), p.get("db")).connect();
+  const client = await (await getPool(p.get("server"), p.get("db"))).connect();
   try {
     await client.query("begin read only");
     const body = p.get("table") ? await tableDetail(client, p.get("schema"), p.get("table")) : await overview(client);

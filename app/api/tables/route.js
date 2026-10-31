@@ -9,7 +9,7 @@ export async function GET(req) {
   if (denied) return denied;
   const p = new URL(req.url).searchParams;
   try {
-    const { rows } = await getPool(p.get("server"), p.get("db")).query(
+    const { rows } = await (await getPool(p.get("server"), p.get("db"))).query(
       `select n.nspname as schema, c.relname as name,
               case c.relkind when 'r' then 'table' when 'p' then 'table'
                              when 'v' then 'view' when 'm' then 'matview'

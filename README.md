@@ -8,7 +8,10 @@ A private, full read/write Postgres client for a home server. Next.js 16 (App Ro
   - Give each one a name, then fill in host, port, database, user, password and SSL, or paste a `postgres://` connection string to fill them.
   - **Test** checks the connection before you save it.
   - A connection shows just its own database, or every database on the server if you tick that box.
-  - They're stored in `$DATA_DIR/connections.json` (default `./data`). Passwords are encrypted with AES-256-GCM using a key derived from `SESSION_SECRET`. If you change the secret, re-enter saved passwords.
+  - They're stored in dbdesk's own Postgres database (`DBDESK_DATABASE_URL`), in a `dbdesk_connections` table it creates on first use. Each whole connection (name, host, user, password and the rest) is one AES-256-GCM blob keyed by `DBDESK_ENCRYPTION_KEY`, with a fresh IV per write and the row id bound in, so the table holds only ids, a key version and ciphertext. Passwords are decrypted only on the server, when connecting, and are never sent to the browser.
+  - The key lives only in the environment. A leaked dump or backup of the store database is useless without it. Someone with access to the server itself has both, so this doesn't protect against that.
+  - **Rotating the key:** set the new key as `DBDESK_ENCRYPTION_KEY`, raise `DBDESK_ENCRYPTION_KEY_VERSION` (default 1), and put the old key in `DBDESK_OLD_ENCRYPTION_KEYS` as `1:<key>`. Rows are re-encrypted the next time they're loaded. After that you can remove the old key.
+  - An old `$DATA_DIR/connections.json` (the previous file store) is imported once, when the table is empty, and renamed to `connections.json.imported`.
   - Connections from `DATABASE_URL` / `DATABASE_SERVERS` still work and appear read-only.
 - **Table browser.** Tables, views and materialized views are grouped by schema, with a filter and row estimates.
 - **Data tab.**
@@ -27,7 +30,7 @@ A private, full read/write Postgres client for a home server. Next.js 16 (App Ro
 
 ## Login
 
-There is one admin password and no signup or users table. dbdesk doesn't need a database of its own.
+There is one admin password and no signup or users table. dbdesk's own database only holds saved connections.
 
 - `npm run hash-password` asks for a password (at least 12 characters, input hidden). It prints two env lines:
   - `ADMIN_PASSWORD_HASH`, an scrypt hash in the form `scrypt:salt:hash`. It contains no `$`, so Coolify won't mangle it.
@@ -44,6 +47,7 @@ There is one admin password and no signup or users table. dbdesk doesn't need a 
 cp .env.example .env.local
 npm install
 npm run hash-password        # paste both lines into .env.local
+openssl rand -base64 32      # DBDESK_ENCRYPTION_KEY; also set DBDESK_DATABASE_URL
 npm run dev                  # http://localhost:3000, then "+ Add" a connection
 ```
 
@@ -53,8 +57,10 @@ npm run dev                  # http://localhost:3000, then "+ Add" a connection
 2. **Leave the Domains field empty.** That keeps Traefik from routing to the app, so nothing appears on Cloudflare or the public internet.
 3. **Environment variables:**
    - Paste `ADMIN_PASSWORD_HASH` and `SESSION_SECRET` from `npm run hash-password`. Run it on your PC, or in the app's Coolify terminal with `node scripts/hash-password.mjs`, then redeploy.
-4. **Persistent storage:** add a volume mounted at `/app/data` so saved connections survive redeploys.
-   - Then add connections in the app. For a Coolify Postgres resource, paste its *Postgres URL (internal)*.
+   - `DBDESK_DATABASE_URL`: the internal URL of a Postgres database for dbdesk itself. A role that owns that database is enough.
+   - `DBDESK_ENCRYPTION_KEY`: from `openssl rand -base64 32`. Store a copy in your password manager.
+4. **Saved connections** live in that database, so they survive redeploys and no volume is needed.
+   - Add connections in the app. For a Coolify Postgres resource, paste its *Postgres URL (internal)*.
    - If the app can't resolve that hostname, turn on **Connect To Predefined Network** in the app's Advanced settings.
 5. **Expose it on the tailnet only.** Pick one option:
    - **A. Tailscale Serve (recommended).** This gives you HTTPS and a MagicDNS name.
@@ -72,7 +78,7 @@ npm run dev                  # http://localhost:3000, then "+ Add" a connection
 ```
 proxy.js                  redirects to /login without a valid session
 lib/auth.js               scrypt verify, signed session cookie, login rate limit
-lib/connections.js        saved connections (JSON file, encrypted passwords) + env connections
+lib/connections.js        saved connections (encrypted rows in DBDESK_DATABASE_URL) + env connections
 lib/db.js                 pool per connection/database, identifier quoting, column metadata
 app/login                 login page
 app/api/auth/login|logout POST sign in / sign out

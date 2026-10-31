@@ -13,7 +13,7 @@ export async function POST(req) {
   const started = performance.now();
   let client;
   try {
-    client = new pg.Client({ ...draftConfig(await req.json()), connectionTimeoutMillis: 8000 });
+    client = new pg.Client({ ...(await draftConfig(await req.json())), connectionTimeoutMillis: 8000 });
     await client.connect();
     const { rows } = await client.query("select current_setting('server_version') as version, current_user as user");
     return Response.json({ ok: true, ...rows[0], ms: Math.round(performance.now() - started) });

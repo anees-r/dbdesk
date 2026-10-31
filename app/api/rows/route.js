@@ -16,7 +16,7 @@ export async function POST(req) {
   if (denied) return denied;
   const body = await req.json();
   const { action, server, db, schema, table } = body;
-  const client = await getPool(server, db).connect();
+  const client = await (await getPool(server, db)).connect();
   try {
     const columns = await getColumns(client, schema, table);
     const known = new Set(columns.map((c) => c.name));
